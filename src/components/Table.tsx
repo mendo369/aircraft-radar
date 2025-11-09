@@ -24,7 +24,7 @@ export function Table() {
         {/* Tabla de Aviones Activos */}
         <div className="mb-4">
           <h3 className="font-semibold mb-1">Aviones Activos:</h3>
-          <ul className='flex flex-col gap-1 max-h-[calc((100vh-100px)/2)] overflow-y-auto'> {/* Ajusta altura */}
+          <ul className='flex flex-col gap-1 max-h-[70%] overflow-y-auto'> {/* Ajusta altura */}
             {activeAircrafts.map((aircraft) => {
               const textColor = getTextColor(aircraft.collisionState);
 
