@@ -12,10 +12,10 @@ export function Panel() {
 
   const getIconColor = (collisionState: string) => {
     switch (collisionState) {
-      case 'warning': return '#FBBF24';
-      case 'danger': return '#EF4444';
-      case 'collision': return '#B91C1C';
-      default: return '#2adb36';
+      case 'warning': return '#FBBF24'; // Amarillo
+      case 'danger': return '#EF4444';   // Rojo
+      case 'collision': return '#B91C1C'; // Rojo oscuro
+      default: return '#2adb36'; // Verde claro
     }
   };
 
@@ -24,34 +24,88 @@ export function Panel() {
 
   return (
     <section className='flex-1 relative overflow-hidden'>
-      <h1 className='absolute top-2 left-1/2 transform -translate-x-1/2 text-white font-bold z-10'>
-        Radar de Aviones
+      <h1 className='absolute top-2 left-1/2 transform -translate-x-1/2 text-green-400 font-bold z-10'>
+        Radar de Aviones (Plano Cartesiano)
       </h1>
 
+      {/* Fondo del panel */}
       <div
-        className="w-full h-full"
-        // Agrega aquí el fondo del radar si lo tienes (bg, backgroundImage, etc.)
+        className="w-full h-full bg-black relative"
+        style={{
+          backgroundImage: 'radial-gradient(circle at center, rgba(0, 255, 0, 0.05) 0%, transparent 70%)',
+        }}
       >
-        {visibleAircrafts.map((aircraft) => { // Mapear solo los aviones visibles
+        {/* Eje X (horizontal) */}
+        <div className="absolute w-full h-[1px] bg-green-500" style={{ top: '50%' }} />
+        {/* Eje Y (vertical) */}
+        <div className="absolute h-full w-[1px] bg-green-500" style={{ left: '50%' }} />
+
+        {/* Etiquetas de los ejes */}
+        {/* Eje X (valores de 0 a 100) */}
+        {Array.from({ length: 11 }, (_, i) => {
+          const value = i * 10;
+          return (
+            <div
+              key={`x-label-${value}`}
+              className="absolute text-xs text-green-400 font-mono pointer-events-none"
+              style={{
+                left: `${i * 10}%`,
+                bottom: '0',
+                transform: 'translateX(-50%)',
+              }}
+            >
+              {value}
+            </div>
+          );
+        })}
+
+        {/* Eje Y (valores de 0 a 100) */}
+        {Array.from({ length: 11 }, (_, i) => {
+          const value = i * 10;
+          return (
+            <div
+              key={`y-label-${value}`}
+              className="absolute text-xs text-green-400 font-mono pointer-events-none"
+              style={{
+                right: '0',
+                top: `${100 - i * 10}%`,
+                transform: 'translateY(-50%)',
+              }}
+            >
+              {value}
+            </div>
+          );
+        })}
+
+        {/* Mostrar los aviones */}
+        {visibleAircrafts.map((aircraft) => {
           const iconColor = getIconColor(aircraft.collisionState);
+
+          // Convertir las coordenadas (x, y) de 0-100 a porcentajes del contenedor
+          // Asumiendo que el origen (0,0) está en la esquina inferior izquierda
+          // y (100,100) en la esquina superior derecha.
+          const xPercent = aircraft.x; // Directamente el valor de x como porcentaje
+          const yPercent = 100 - aircraft.y; // Invertimos y porque en CSS el 0% es arriba
 
           return (
             <div
               key={aircraft.id}
               className={`absolute w-4 h-4 flex items-center justify-center text-xs font-bold`}
               style={{
-                left: `${aircraft.x}%`,
-                top: `${aircraft.y}%`,
+                left: `${xPercent}%`,
+                top: `${yPercent}%`,
                 transform: 'translate(-50%, -50%)',
               }}
               title={`${aircraft.callsign} (X:${aircraft.x.toFixed(2)}, Y:${aircraft.y.toFixed(2)}, Estado: ${aircraft.collisionState})`}
             >
               <div className="relative inline-block">
-                <span className={`absolute top-[-20px] z-50  text-[${iconColor}]`}>{`${aircraft.callsign} `}</span>
+                <span className={`absolute top-[-20px] z-50 text-xs`} style={{ color: iconColor }}>
+                  {aircraft.callsign}
+                </span>
                 <div
                   className="flex items-center justify-center"
                   style={{
-                    transform: `rotate(${calculateAngle(aircraft.dx, aircraft.dy)-40}deg)`,
+                    transform: `rotate(${calculateAngle(aircraft.dx, aircraft.dy)}deg)`,
                   }}
                 >
                   {aircraft.collisionState === 'collision' ? (
