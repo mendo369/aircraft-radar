@@ -1,140 +1,420 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 
-// Definición del tipo para un avión, incluyendo estado de colisión y nueva información
-interface Aircraft {
+// Clase para representar un avión como un nodo
+class Aircraft {
   id: string;
   x: number;
   y: number;
   dx: number;
   dy: number;
   callsign: string;
-  collisionState: 'safe' | 'warning' | 'danger' | 'collision'; // Nuevo estado
+  collisionState: 'safe' | 'warning' | 'danger' | 'collision';
   passengers: number;
   pilotName: string;
   origin: string;
   destination: string;
+
+  constructor(
+    id: string,
+    x: number,
+    y: number,
+    dx: number,
+    dy: number,
+    callsign: string,
+    passengers: number,
+    pilotName: string,
+    origin: string,
+    destination: string,
+    collisionState: 'safe' | 'warning' | 'danger' | 'collision' = 'safe'
+  ) {
+    this.id = id;
+    this.x = x;
+    this.y = y;
+    this.dx = dx;
+    this.dy = dy;
+    this.callsign = callsign;
+    this.passengers = passengers;
+    this.pilotName = pilotName;
+    this.origin = origin;
+    this.destination = destination;
+    this.collisionState = collisionState;
+  }
+
+  distanceTo(other: Aircraft): number {
+    return Math.sqrt(Math.pow(this.x - other.x, 2) + Math.pow(this.y - other.y, 2));
+  }
+
+  updatePosition(): Aircraft {
+    if (this.collisionState === 'collision') {
+      return this;
+    }
+
+    let newX = this.x + this.dx;
+    let newY = this.y + this.dy;
+    let newDx = this.dx;
+    let newDy = this.dy;
+
+    if (newX < 0 || newX > 100) {
+      newX = this.x;
+      newDx = -this.dx;
+    }
+    if (newY < 0 || newY > 100) {
+      newY = this.y;
+      newDy = -this.dy;
+    }
+
+    return new Aircraft(
+      this.id,
+      newX,
+      newY,
+      newDx,
+      newDy,
+      this.callsign,
+      this.passengers,
+      this.pilotName,
+      this.origin,
+      this.destination,
+      this.collisionState
+    );
+  }
+
+  withCollisionState(state: 'safe' | 'warning' | 'danger' | 'collision'): Aircraft {
+    return new Aircraft(
+      this.id,
+      this.x,
+      this.y,
+      this.dx,
+      this.dy,
+      this.callsign,
+      this.passengers,
+      this.pilotName,
+      this.origin,
+      this.destination,
+      state
+    );
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      x: this.x,
+      y: this.y,
+      dx: this.dx,
+      dy: this.dy,
+      callsign: this.callsign,
+      collisionState: this.collisionState,
+      passengers: this.passengers,
+      pilotName: this.pilotName,
+      origin: this.origin,
+      destination: this.destination
+    };
+  }
 }
 
-// Interfaz para el historial de colisiones (puede ser el mismo tipo o un subconjunto)
-interface CollisionHistoryItem extends Omit<Aircraft, 'collisionState'> {
-  finalCollisionState: 'warning' | 'danger' | 'collision'; // Estado en el momento del registro
-  timestamp: number; // Marca de tiempo para ordenar
+// Nodo para la cola de prioridad
+class AlertNode {
+  aircraft: Aircraft;
+  priority: number; // 3 = collision, 2 = danger, 1 = warning
+  timestamp: number;
+  next: AlertNode | null;
+
+  constructor(aircraft: Aircraft, priority: number, timestamp: number) {
+    this.aircraft = aircraft;
+    this.priority = priority;
+    this.timestamp = timestamp;
+    this.next = null;
+  }
 }
 
-// Acciones que pueden ocurrir en el contexto
-type Action =
-  | { type: 'SET_AIRCRAFTS'; payload: Aircraft[] }
-  | { type: 'UPDATE_AIRCRAFT_POSITIONS' }
-  | { type: 'ADD_TO_COLLISION_HISTORY'; payload: CollisionHistoryItem[] }; // Nueva acción
+// Cola de prioridad para alertas de colisión (implementada como lista enlazada)
+class PriorityAlertQueue {
+  private head: AlertNode | null = null;
+  private size: number = 0;
 
-// Estado del contexto
-interface AircraftState {
-  aircrafts: Aircraft[];
-  collisionHistory: CollisionHistoryItem[]; // Nuevo estado
+  // Encolar con prioridad (mayor prioridad = más grave)
+  enqueue(aircraft: Aircraft, priority: number): void {
+    const newNode = new AlertNode(aircraft, priority, Date.now());
+    this.size++;
+
+    // Si la cola está vacía o el nuevo nodo tiene mayor prioridad que el head
+    if (!this.head || priority > this.head.priority || 
+        (priority === this.head.priority && newNode.timestamp < this.head.timestamp)) {
+      newNode.next = this.head;
+      this.head = newNode;
+      return;
+    }
+
+    // Buscar la posición correcta según prioridad y timestamp
+    let current = this.head;
+    while (current.next !== null && 
+           (current.next.priority > priority || 
+            (current.next.priority === priority && current.next.timestamp <= newNode.timestamp))) {
+      current = current.next;
+    }
+
+    newNode.next = current.next;
+    current.next = newNode;
+  }
+
+  // Desencolar (retorna el de mayor prioridad)
+  dequeue(): Aircraft | null {
+    if (!this.head) return null;
+    
+    const aircraft = this.head.aircraft;
+    this.head = this.head.next;
+    this.size--;
+    return aircraft;
+  }
+
+  // Ver el siguiente sin desencolarlo
+  peek(): Aircraft | null {
+    return this.head ? this.head.aircraft : null;
+  }
+
+  // Verificar si está vacía
+  isEmpty(): boolean {
+    return this.head === null;
+  }
+
+  // Obtener el tamaño
+  getSize(): number {
+    return this.size;
+  }
+
+  // Convertir a array para visualización
+  toArray(): Aircraft[] {
+    const result: Aircraft[] = [];
+    let current = this.head;
+    while (current !== null) {
+      result.push(current.aircraft);
+      current = current.next;
+    }
+    return result;
+  }
+
+  // Limpiar la cola
+  clear(): void {
+    this.head = null;
+    this.size = 0;
+  }
+
+  // Verificar si un avión ya está en la cola
+  contains(aircraftId: string): boolean {
+    let current = this.head;
+    while (current !== null) {
+      if (current.aircraft.id === aircraftId) {
+        return true;
+      }
+      current = current.next;
+    }
+    return false;
+  }
 }
 
-// Función para calcular la distancia euclidiana entre dos puntos
-const calculateDistance = (a: { x: number; y: number }, b: { x: number; y: number }): number => {
-  return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
-};
+// Clase para el historial de colisiones
+class CollisionHistoryItem {
+  id: string;
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  callsign: string;
+  passengers: number;
+  pilotName: string;
+  origin: string;
+  destination: string;
+  finalCollisionState: 'warning' | 'danger' | 'collision';
+  timestamp: number;
 
-// Reducer para manejar las acciones
-const aircraftReducer = (state: AircraftState, action: Action): AircraftState => {
-  switch (action.type) {
-    case 'SET_AIRCRAFTS':
-      return { ...state, aircrafts: action.payload, collisionHistory: [] }; // Reinicia historial al inicio
+  constructor(aircraft: Aircraft, finalState: 'warning' | 'danger' | 'collision') {
+    this.id = aircraft.id;
+    this.x = aircraft.x;
+    this.y = aircraft.y;
+    this.dx = aircraft.dx;
+    this.dy = aircraft.dy;
+    this.callsign = aircraft.callsign;
+    this.passengers = aircraft.passengers;
+    this.pilotName = aircraft.pilotName;
+    this.origin = aircraft.origin;
+    this.destination = aircraft.destination;
+    this.finalCollisionState = finalState;
+    this.timestamp = Date.now();
+  }
 
-    case 'UPDATE_AIRCRAFT_POSITIONS': {
-      // Actualiza la posición de cada avión basado en su velocidad (dx, dy)
-      const updatedAircraftsWithoutCollision = state.aircrafts.map(ac => {
-        // Si ya está en colisión, no se mueve
-        if (ac.collisionState === 'collision') {
-          return ac;
+  toJSON() {
+    return {
+      id: this.id,
+      x: this.x,
+      y: this.y,
+      dx: this.dx,
+      dy: this.dy,
+      callsign: this.callsign,
+      passengers: this.passengers,
+      pilotName: this.pilotName,
+      origin: this.origin,
+      destination: this.destination,
+      finalCollisionState: this.finalCollisionState,
+      timestamp: this.timestamp
+    };
+  }
+}
+
+// Tupla para pares de colisión
+type CollisionPair = [Aircraft, Aircraft, number];
+
+// Clase para detectar colisiones usando Divide y Vencerás
+class CollisionDetector {
+  private warningThreshold: number = 10;
+  private dangerThreshold: number = 1;
+
+  detectCollisions(aircrafts: Aircraft[], alertQueue: PriorityAlertQueue): Map<string, 'safe' | 'warning' | 'danger' | 'collision'> {
+    const collisionStates = new Map<string, 'safe' | 'warning' | 'danger' | 'collision'>();
+    
+    aircrafts.forEach(ac => {
+      collisionStates.set(ac.id, ac.collisionState === 'collision' ? 'collision' : 'safe');
+    });
+
+    // Usar divide y vencerás para encontrar colisiones
+    const pairs = this.divideAndConquer(aircrafts, 0, aircrafts.length - 1);
+
+    // Procesar pares y encolar alertas
+    pairs.forEach(([ac1, ac2, distance]) => {
+      if (ac1.collisionState !== 'collision' && ac2.collisionState !== 'collision') {
+        let newState: 'warning' | 'danger' | 'collision' | null = null;
+        let priority = 0;
+
+        if (distance < this.dangerThreshold) {
+          newState = 'collision';
+          priority = 3;
+          collisionStates.set(ac1.id, 'collision');
+          collisionStates.set(ac2.id, 'collision');
+        } else if (distance < this.warningThreshold / 2) {
+          newState = 'danger';
+          priority = 2;
+          const state1 = collisionStates.get(ac1.id);
+          const state2 = collisionStates.get(ac2.id);
+          if (state1 !== 'collision') collisionStates.set(ac1.id, 'danger');
+          if (state2 !== 'collision') collisionStates.set(ac2.id, 'danger');
+        } else if (distance < this.warningThreshold) {
+          newState = 'warning';
+          priority = 1;
+          const state1 = collisionStates.get(ac1.id);
+          const state2 = collisionStates.get(ac2.id);
+          if (state1 !== 'collision' && state1 !== 'danger') collisionStates.set(ac1.id, 'warning');
+          if (state2 !== 'collision' && state2 !== 'danger') collisionStates.set(ac2.id, 'warning');
         }
 
-        let newX = ac.x + ac.dx;
-        let newY = ac.y + ac.dy;
-
-        // Lógica de rebote en los bordes (solo si no está en colisión)
-        if (newX < 0 || newX > 100) {
-          return { ...ac, x: ac.x, dx: -ac.dx };
-        }
-        if (newY < 0 || newY > 100) {
-          return { ...ac, y: ac.y, dy: -ac.dy };
-        }
-
-        return { ...ac, x: newX, y: newY };
-      });
-
-      // Calcula los estados de colisión basados en las nuevas posiciones
-      const collisionStates: Record<string, Aircraft['collisionState']> = {};
-      const numAircrafts = updatedAircraftsWithoutCollision.length;
-      const newCollisionHistoryItems: CollisionHistoryItem[] = [];
-
-      // Inicializa estados actuales como 'safe' o mantiene el anterior si no es 'collision'
-      updatedAircraftsWithoutCollision.forEach(ac => {
-        collisionStates[ac.id] = ac.collisionState === 'collision' ? 'collision' : 'safe';
-      });
-
-      // Calcula distancias y actualiza estados
-      for (let i = 0; i < numAircrafts - 1; i++) {
-        for (let j = i + 1; j < numAircrafts; j++) {
-          const ac1 = updatedAircraftsWithoutCollision[i];
-          const ac2 = updatedAircraftsWithoutCollision[j];
-          // Solo calcular si ninguno de los dos ya está en estado 'collision'
-          if (ac1.collisionState !== 'collision' && ac2.collisionState !== 'collision') {
-            const distance = calculateDistance(ac1, ac2);
-
-            // Define umbrales en porcentaje
-            const warningThreshold = 5;
-            const dangerThreshold = 1; // Ajusta según escala
-
-            if (distance < dangerThreshold) {
-              collisionStates[ac1.id] = 'collision';
-              collisionStates[ac2.id] = 'collision';
-
-              // Agregar al historial si no está ya registrado
-              if (!state.collisionHistory.some(item => item.id === ac1.id)) {
-                 newCollisionHistoryItems.push({
-                   ...ac1,
-                   finalCollisionState: 'collision',
-                   timestamp: Date.now()
-                 });
-              }
-              if (!state.collisionHistory.some(item => item.id === ac2.id)) {
-                 newCollisionHistoryItems.push({
-                   ...ac2,
-                   finalCollisionState: 'collision',
-                   timestamp: Date.now()
-                 });
-              }
-            } else if (distance < warningThreshold) {
-               if (collisionStates[ac1.id] !== 'collision') collisionStates[ac1.id] = 'danger'; // Usamos 'danger' para el umbral intermedio
-               if (collisionStates[ac2.id] !== 'collision') collisionStates[ac2.id] = 'danger';
-            } else if (distance < warningThreshold * 2) { // Opcional: umbral intermedio para 'warning'
-               if (collisionStates[ac1.id] !== 'collision' && collisionStates[ac1.id] !== 'danger') collisionStates[ac1.id] = 'warning';
-               if (collisionStates[ac2.id] !== 'collision' && collisionStates[ac2.id] !== 'danger') collisionStates[ac2.id] = 'warning';
-            }
+        // Encolar en la cola de prioridad si hay alerta y no está ya encolado
+        if (newState && priority > 0) {
+          if (!alertQueue.contains(ac1.id)) {
+            alertQueue.enqueue(ac1.withCollisionState(newState), priority);
+          }
+          if (!alertQueue.contains(ac2.id)) {
+            alertQueue.enqueue(ac2.withCollisionState(newState), priority);
           }
         }
       }
+    });
 
-      // Actualiza el estado de colisión en los aviones que no estaban en colisión
-      const updatedAircrafts = updatedAircraftsWithoutCollision.map(ac => {
-        if (ac.collisionState !== 'collision') {
-          return { ...ac, collisionState: collisionStates[ac.id] || 'safe' };
-        }
-        return ac; // Mantiene aviones en colisión sin cambios
-      });
+    return collisionStates;
+  }
 
-      // Combina el historial existente con los nuevos ítems
-      const updatedCollisionHistory = [...state.collisionHistory, ...newCollisionHistoryItems];
-
-      return { ...state, aircrafts: updatedAircrafts, collisionHistory: updatedCollisionHistory };
+  private divideAndConquer(aircrafts: Aircraft[], left: number, right: number): CollisionPair[] {
+    if (right - left < 1) {
+      return [];
     }
 
-    case 'ADD_TO_COLLISION_HISTORY': // No se usará directamente, la lógica está en UPDATE_AIRCRAFT_POSITIONS
-      return state;
+    if (right - left === 1) {
+      const ac1 = aircrafts[left];
+      const ac2 = aircrafts[right];
+      const distance = ac1.distanceTo(ac2);
+      if (distance < this.warningThreshold) {
+        return [[ac1, ac2, distance]];
+      }
+      return [];
+    }
+
+    const mid = Math.floor((left + right) / 2);
+
+    const leftPairs = this.divideAndConquer(aircrafts, left, mid);
+    const rightPairs = this.divideAndConquer(aircrafts, mid + 1, right);
+    const crossPairs = this.findCrossPairs(aircrafts, left, mid, right);
+
+    return [...leftPairs, ...rightPairs, ...crossPairs];
+  }
+
+  private findCrossPairs(aircrafts: Aircraft[], left: number, mid: number, right: number): CollisionPair[] {
+    const pairs: CollisionPair[] = [];
+
+    for (let i = left; i <= mid; i++) {
+      for (let j = mid + 1; j <= right; j++) {
+        const ac1 = aircrafts[i];
+        const ac2 = aircrafts[j];
+        const distance = ac1.distanceTo(ac2);
+        
+        if (distance < this.warningThreshold) {
+          pairs.push([ac1, ac2, distance]);
+        }
+      }
+    }
+
+    return pairs;
+  }
+}
+
+// Acciones
+type Action =
+  | { type: 'SET_AIRCRAFTS'; payload: Aircraft[] }
+  | { type: 'UPDATE_AIRCRAFT_POSITIONS' };
+
+// Estado
+interface AircraftState {
+  aircrafts: Aircraft[];
+  collisionHistory: CollisionHistoryItem[];
+  alertQueue: PriorityAlertQueue; // Cola de prioridad para alertas
+}
+
+// Reducer
+const aircraftReducer = (state: AircraftState, action: Action): AircraftState => {
+  switch (action.type) {
+    case 'SET_AIRCRAFTS':
+      return { 
+        ...state, 
+        aircrafts: action.payload, 
+        collisionHistory: [],
+        alertQueue: new PriorityAlertQueue()
+      };
+
+    case 'UPDATE_AIRCRAFT_POSITIONS': {
+      const updatedPositions = state.aircrafts.map(ac => ac.updatePosition());
+
+      // Crear nueva cola para esta iteración
+      const newAlertQueue = new PriorityAlertQueue();
+      
+      // Detectar colisiones y llenar la cola
+      const detector = new CollisionDetector();
+      const collisionStates = detector.detectCollisions(updatedPositions, newAlertQueue);
+
+      const newCollisionHistoryItems: CollisionHistoryItem[] = [];
+      const updatedAircrafts = updatedPositions.map(ac => {
+        const newState = collisionStates.get(ac.id) || 'safe';
+        
+        if (newState === 'collision' && ac.collisionState !== 'collision') {
+          if (!state.collisionHistory.some(item => item.id === ac.id)) {
+            newCollisionHistoryItems.push(new CollisionHistoryItem(ac, 'collision'));
+          }
+        }
+
+        return ac.withCollisionState(newState);
+      });
+
+      return {
+        ...state,
+        aircrafts: updatedAircrafts,
+        collisionHistory: [...state.collisionHistory, ...newCollisionHistoryItems],
+        alertQueue: newAlertQueue
+      };
+    }
 
     default:
       return state;
@@ -155,23 +435,26 @@ export const useAircraft = () => {
 };
 
 export const AircraftProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(aircraftReducer, { aircrafts: [], collisionHistory: [] });
+  const [state, dispatch] = useReducer(aircraftReducer, { 
+    aircrafts: [], 
+    collisionHistory: [],
+    alertQueue: new PriorityAlertQueue()
+  });
 
   useEffect(() => {
-    // Función para generar datos aleatorios
     const generateRandomData = () => {
-        const callsigns = ['AV', 'CO', 'LA', 'AA', 'BA'];
-        const origins = ['JFK', 'LAX', 'CDG', 'FRA', 'HND', 'DXB', 'LHR', 'SYD'];
-        const destinations = ['JFK', 'LAX', 'CDG', 'FRA', 'HND', 'DXB', 'LHR', 'SYD'];
-        const pilotNames = ['Juan G.', 'Maria L.', 'Carlos R.', 'Ana P.', 'Luis T.', 'Sofia M.', 'Pedro D.'];
+      const callsigns = ['AV', 'CO', 'LA', 'AA', 'BA'];
+      const origins = ['JFK', 'LAX', 'CDG', 'FRA', 'HND', 'DXB', 'LHR', 'SYD'];
+      const destinations = ['JFK', 'LAX', 'CDG', 'FRA', 'HND', 'DXB', 'LHR', 'SYD'];
+      const pilotNames = ['Juan G.', 'Maria L.', 'Carlos R.', 'Ana P.', 'Luis T.', 'Sofia M.', 'Pedro D.'];
 
-        return {
-            callsign: `${callsigns[Math.floor(Math.random() * callsigns.length)]}-${Math.floor(Math.random() * 900) + 100}`,
-            origin: origins[Math.floor(Math.random() * origins.length)],
-            destination: destinations[Math.floor(Math.random() * destinations.length)],
-            pilotName: pilotNames[Math.floor(Math.random() * pilotNames.length)],
-            passengers: Math.floor(Math.random() * 200) + 50 // Entre 50 y 249
-        };
+      return {
+        callsign: `${callsigns[Math.floor(Math.random() * callsigns.length)]}-${Math.floor(Math.random() * 900) + 100}`,
+        origin: origins[Math.floor(Math.random() * origins.length)],
+        destination: destinations[Math.floor(Math.random() * destinations.length)],
+        pilotName: pilotNames[Math.floor(Math.random() * pilotNames.length)],
+        passengers: Math.floor(Math.random() * 200) + 50
+      };
     };
 
     const generateInitialAircrafts = (): Aircraft[] => {
@@ -180,7 +463,7 @@ export const AircraftProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const existingPositions: { x: number; y: number }[] = [];
 
       for (let i = 0; i < numAircrafts; i++) {
-        let x:number, y:number;
+        let x: number, y: number;
         let attempts = 0;
         const maxAttempts = 50;
 
@@ -201,7 +484,7 @@ export const AircraftProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         const { callsign, origin, destination, pilotName, passengers } = generateRandomData();
 
-        aircrafts.push({ id: `ac-${i}`, x, y, dx, dy, callsign, collisionState: 'safe', passengers, pilotName, origin, destination });
+        aircrafts.push(new Aircraft(`ac-${i}`, x, y, dx, dy, callsign, passengers, pilotName, origin, destination));
       }
       return aircrafts;
     };
