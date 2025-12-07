@@ -267,15 +267,21 @@ class CollisionDetector {
   private warningThreshold: number = 10;
   private dangerThreshold: number = 1;
 
-  detectCollisions(aircrafts: Aircraft[], alertQueue: PriorityAlertQueue): Map<string, 'safe' | 'warning' | 'danger' | 'collision'> {
+  detectCollisions(
+    aircrafts: Aircraft[], 
+    alertQueue: PriorityAlertQueue
+  ): Map<string, 'safe' | 'warning' | 'danger' | 'collision'> {
     const collisionStates = new Map<string, 'safe' | 'warning' | 'danger' | 'collision'>();
     
     aircrafts.forEach(ac => {
       collisionStates.set(ac.id, ac.collisionState === 'collision' ? 'collision' : 'safe');
     });
 
-    // Usar divide y vencerás para encontrar colisiones
-    const pairs = this.divideAndConquer(aircrafts, 0, aircrafts.length - 1);
+    // 🔑 PASO 1: Ordena UNA SOLA VEZ por Y al inicio O(n log n)
+    const sortedByY = [...aircrafts].sort((a, b) => a.y - b.y);
+
+    // PASO 2: Usa divide y conquista pasando la lista ordenada
+    const pairs = this.divideAndConquer(aircrafts, sortedByY, 0, aircrafts.length - 1);
 
     // Procesar pares y encolar alertas
     pairs.forEach(([ac1, ac2, distance]) => {
@@ -319,7 +325,12 @@ class CollisionDetector {
     return collisionStates;
   }
 
-  private divideAndConquer(aircrafts: Aircraft[], left: number, right: number): CollisionPair[] {
+  private divideAndConquer(
+    aircrafts: Aircraft[], 
+    sortedByY: Aircraft[], 
+    left: number, 
+    right: number
+  ): CollisionPair[] {
     if (right - left < 1) {
       return [];
     }
@@ -336,30 +347,69 @@ class CollisionDetector {
 
     const mid = Math.floor((left + right) / 2);
 
-    const leftPairs = this.divideAndConquer(aircrafts, left, mid);
-    const rightPairs = this.divideAndConquer(aircrafts, mid + 1, right);
-    const crossPairs = this.findCrossPairs(aircrafts, left, mid, right);
+    const leftPairs = this.divideAndConquer(aircrafts, sortedByY, left, mid);
+    const rightPairs = this.divideAndConquer(aircrafts, sortedByY, mid + 1, right);
+    
+    // 🔑 findCrossPairsOptimized NO ORDENA, usa sortedByY existente
+    const crossPairs = this.findCrossPairsOptimized(aircrafts, sortedByY, left, mid, right);
 
     return [...leftPairs, ...rightPairs, ...crossPairs];
   }
 
-  private findCrossPairs(aircrafts: Aircraft[], left: number, mid: number, right: number): CollisionPair[] {
+  private findCrossPairsOptimized(
+    aircrafts: Aircraft[], 
+    sortedByY: Aircraft[], 
+    left: number, 
+    mid: number, 
+    right: number
+  ): CollisionPair[] {
     const pairs: CollisionPair[] = [];
 
+    // Crea sets de IDs para identificar qué aeronaves están en cada mitad
+    const leftIndices = new Set<string>();
+    const rightIndices = new Set<string>();
+
     for (let i = left; i <= mid; i++) {
-      for (let j = mid + 1; j <= right; j++) {
-        const ac1 = aircrafts[i];
-        const ac2 = aircrafts[j];
-        const distance = ac1.distanceTo(ac2);
+      leftIndices.add(aircrafts[i].id);
+    }
+    for (let i = mid + 1; i <= right; i++) {
+      rightIndices.add(aircrafts[i].id);
+    }
+
+    // 🔑 Itera sobre sortedByY (ya está ordenada por Y)
+    // Esto es O(n) en el peor caso pero O(1) en promedio por el BREAK
+    for (let i = 0; i < sortedByY.length; i++) {
+      const acLeft = sortedByY[i];
+      
+      // Solo si está en la mitad izquierda
+      if (!leftIndices.has(acLeft.id)) continue;
+
+      // Busca en la mitad derecha
+      for (let j = i + 1; j < sortedByY.length; j++) {
+        const acRight = sortedByY[j];
+        
+        // Solo si está en la mitad derecha
+        if (!rightIndices.has(acRight.id)) continue;
+
+        const distanceY = Math.abs(acLeft.y - acRight.y);
+        
+        // 🔑 CRUCIAL: Si Y está fuera del rango, NO hay más pares cercanos
+        // Porque sortedByY está ordenada por Y, todo lo que viene es más lejano
+        if (distanceY > this.warningThreshold) {
+          break; // Sin más pares cercanos en esta búsqueda
+        }
+
+        const distance = acLeft.distanceTo(acRight);
         
         if (distance < this.warningThreshold) {
-          pairs.push([ac1, ac2, distance]);
+          pairs.push([acLeft, acRight, distance]);
         }
       }
     }
 
     return pairs;
   }
+
 }
 
 // Acciones
